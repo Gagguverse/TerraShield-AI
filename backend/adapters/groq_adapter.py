@@ -3,18 +3,20 @@
 Provides source-grounded incident analysis and dossier generation using Groq Cloud
 OpenAI-compatible inference (https://api.groq.com/openai/v1).
 Never hallucinates URLs, never leaks credentials, and strictly grounds claims in retrieved evidence.
+Enforces deterministic verification boundaries and post-synthesis validation with safe fallbacks.
 """
 
 import asyncio
 import json
 import logging
-import time
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from backend.config import settings
-from backend.models.evidence import EvidenceRecord
+from backend.models.evidence import EvidenceRecord, EvidenceStatus, SourceType
+from backend.models.incident import VerificationStatus
 
 logger = logging.getLogger("terrashield.groq")
 
@@ -75,104 +77,299 @@ class GroqAdapter:
             logger.error(f"Error querying Groq models: {clean_err}")
             return [], f"Groq connection failed: {clean_err}"
 
+    def build_safe_fallback_summary(
+        self,
+        incident_data: Dict[str, Any],
+        verif_status: str,
+        verif_rationale: str,
+        direct_evidence: List[EvidenceRecord],
+        contextual_evidence: List[EvidenceRecord],
+    ) -> Dict[str, Any]:
+        """Construct an authoritative, strictly grounded fallback summary when Groq is offline or hallucinating."""
+        name = incident_data.get("name", "Satellite Incident")
+        region = incident_data.get("region", "Target Area")
+        lat = incident_data.get("latitude", 0.0)
+        lon = incident_data.get("longitude", 0.0)
+        date_str = incident_data.get("first_detected", "")[:10] or incident_data.get("event_date", "recent")
+        hazard = incident_data.get("hazard_type", "WILDFIRE")
+        frp = incident_data.get("max_frp")
+
+        if verif_status == "INSUFFICIENT_EVIDENCE":
+            exec_summary = (
+                f"A NASA FIRMS satellite thermal anomaly was detected near {region} ({lat:.4f}° N, {lon:.4f}° E) on {date_str}. "
+                f"Ground wildfire status remains unconfirmed because no contemporary on-ground news reports or official agency advisories "
+                f"have verified active fire activity in this specific area. "
+                f"A spaceborne thermal hotspot indicates radiative energy (peak FRP: {frp or 'unspecified'} MW), but is not, by itself, "
+                f"proof of a ground wildfire. Cause not established by the available evidence."
+            )
+        elif verif_status == "NEEDS_REVIEW":
+            exec_summary = (
+                f"A potential incident was detected near {region} on {date_str} with {len(direct_evidence)} direct report(s) "
+                f"and {len(contextual_evidence)} contextual source(s) identified. "
+                f"However, conclusive corroboration remains pending due to incomplete spatial resolution, single-source reporting, "
+                f"or unresolved observation windows. "
+                f"Human review and field confirmation are required before treating this as a verified emergency disaster. "
+                f"Cause not established by the available evidence."
+            )
+        else:
+            sources_note = f"{len(direct_evidence)} independent and official reports" if direct_evidence else "retrieved advisories"
+            exec_summary = (
+                f"Incident in {region} on {date_str} is corroborated by {sources_note} aligning with orbital thermal detections. "
+                f"Retrieved ground advisories document emergency suppression or regional impact matching satellite telemetry. "
+                f"Specific root cause remains subject to official regulatory determination unless explicitly documented."
+            )
+
+        citations = []
+        for ev in direct_evidence[:5]:
+            citations.append({
+                "claim": ev.finding or ev.snippet[:120],
+                "source_title": ev.title,
+                "url": ev.url,
+            })
+
+        return {
+            "executive_summary": exec_summary,
+            "incident_context": f"Centroid: {lat:.4f}° N, {lon:.4f}° E in {region}. Observation date: {date_str}. Status: {verif_status}.",
+            "what_happened": verif_rationale,
+            "location_and_geography": f"Verified coordinates ({lat:.4f}, {lon:.4f}) located in {region}.",
+            "timeline": [],
+            "satellite_and_thermal_observations": f"Orbital radiometer detected thermal energy (peak FRP: {frp or 'N/A'} MW). Spaceborne hotspots require ground verification.",
+            "official_warnings": "Official ground agency bulletins summarized in evidence records.",
+            "documented_impacts": "Documented in attached verified records.",
+            "response_and_mitigation": "Refer to primary agency citations.",
+            "evidence_assessment": f"Deterministic verification status: {verif_status}. Direct evidence sources: {len(direct_evidence)}. Contextual sources: {len(contextual_evidence)}.",
+            "uncertainties_and_gaps": "Cause not established by the available evidence. Satellite anomaly does not establish legal cause without certified field inspection.",
+            "citations": citations,
+            "why_this_conclusion": [
+                {
+                    "claim": f"Incident verification evaluated as {verif_status}",
+                    "supporting_sources": [ev.source_name for ev in direct_evidence[:3]] or ["NASA FIRMS Telemetry"],
+                    "rationale": verif_rationale,
+                }
+            ],
+        }
+
+    def validate_groq_report_integrity(
+        self,
+        report: Dict[str, Any],
+        verif_status: str,
+        incident_data: Dict[str, Any],
+        direct_evidence: List[EvidenceRecord],
+        contextual_evidence: List[EvidenceRecord],
+    ) -> Dict[str, Any]:
+        """Validate synthesized report against deterministic verification constraints.
+
+        If Groq fabricated corroboration or claimed confirmed ground wildfires when status
+        is INSUFFICIENT_EVIDENCE or NEEDS_REVIEW, override executive summary with safe fallback.
+        """
+        if not isinstance(report, dict):
+            return self.build_safe_fallback_summary(
+                incident_data, verif_status, "Invalid structured output.", direct_evidence, contextual_evidence
+            )
+
+        exec_summary = str(report.get("executive_summary", ""))
+        exec_lower = exec_summary.lower()
+
+        # Rule: Groq must NEVER upgrade INSUFFICIENT_EVIDENCE into confirmed or corroborated
+        if verif_status == "INSUFFICIENT_EVIDENCE":
+            hallucination_indicators = [
+                "confirmed wildfire", "raging wildfire", "major forest fire", "deadly blaze",
+                "iaf deployed", "bambi bucket", "ndrf mobilized", "wildfire has been corroborated",
+                "authorities have confirmed", "evacuation orders issued"
+            ]
+            has_hallucination = any(term in exec_lower for term in hallucination_indicators)
+            lacks_satellite_qualification = not any(term in exec_lower for term in ["satellite", "thermal anomaly", "hotspot", "unconfirmed"])
+
+            if has_hallucination or lacks_satellite_qualification or len(direct_evidence) == 0:
+                logger.warning(f"Groq synthesis failed integrity validation for {incident_data.get('id')}; replacing with grounded fallback.")
+                fallback = self.build_safe_fallback_summary(
+                    incident_data, verif_status, incident_data.get("verification", {}).get("rationale", ""), direct_evidence, contextual_evidence
+                )
+                report["executive_summary"] = fallback["executive_summary"]
+                report["uncertainties_and_gaps"] = (
+                    "NASA FIRMS observed a spaceborne thermal anomaly. Wildfire status on the ground remains unconfirmed. "
+                    "Cause not established by the available evidence."
+                )
+
+        elif verif_status == "NEEDS_REVIEW":
+            if "conclusively corroborated" in exec_lower or "fully verified wildfire" in exec_lower:
+                fallback = self.build_safe_fallback_summary(
+                    incident_data, verif_status, incident_data.get("verification", {}).get("rationale", ""), direct_evidence, contextual_evidence
+                )
+                report["executive_summary"] = fallback["executive_summary"]
+
+        return report
+
     async def generate_incident_dossier(
         self,
         incident_data: Dict[str, Any],
         evidence_records: List[EvidenceRecord],
+        research_audit: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Generate a source-grounded incident analysis report via Groq Cloud GPT-OSS.
 
-        Grounds all claims in real incident metadata and retrieved evidence records.
+        Strictly partitions inputs into 6 structured sections:
+        1. NASA FIRMS satellite observations
+        2. Directly relevant fetched evidence
+        3. Historical/contextual background
+        4. Excluded or mismatched sources
+        5. Retrieval errors and missing information
+        6. Deterministic verification status and reasons
         """
+        verif_data = incident_data.get("verification") or {}
+        verif_status = verif_data.get("status") if isinstance(verif_data, dict) else getattr(verif_data, "status", "INSUFFICIENT_EVIDENCE")
+        if hasattr(verif_status, "value"):
+            verif_status = verif_status.value
+        verif_status = str(verif_status)
+        verif_rationale = verif_data.get("rationale", "Deterministic verification assessment.") if isinstance(verif_data, dict) else getattr(verif_data, "rationale", "")
+
+        # Partition evidence records strictly
+        direct_evidence: List[EvidenceRecord] = []
+        contextual_evidence: List[EvidenceRecord] = []
+        excluded_sources: List[str] = []
+
+        for ev in evidence_records:
+            is_direct = (
+                (ev.fetch_status == EvidenceStatus.ACTIVE and ev.relevance_label == "Relevant")
+                or (ev.is_official and ev.relevance_score >= 0.7)
+            )
+            is_historical = (
+                "historical" in (ev.relevance_explanation or "").lower()
+                or "historical" in (ev.evidence_role or "").lower()
+                or ev.provenance_origin == "HISTORICAL_ARCHIVE"
+            )
+
+            if is_historical:
+                contextual_evidence.append(ev)
+            elif is_direct:
+                direct_evidence.append(ev)
+            elif ev.relevance_label == "Partial match":
+                contextual_evidence.append(ev)
+            else:
+                excluded_sources.append(f"{ev.source_name} ({ev.url}): {ev.relevance_explanation or 'Failed location or date criteria'}")
+
         if not self.is_configured:
+            fallback = self.build_safe_fallback_summary(
+                incident_data, verif_status, verif_rationale, direct_evidence, contextual_evidence
+            )
             return {
                 "status": "credentials_missing",
                 "message": (
                     "GROQ_API_KEY is not configured in backend .env. "
                     "Register for a free key at https://console.groq.com/keys and set GROQ_API_KEY in .env "
-                    "to activate GPT-OSS incident synthesis."
+                    "to activate live GPT-OSS incident synthesis."
                 ),
                 "model_id": self.model,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-                "report": None,
+                "report": fallback,
             }
 
-        # Build clean evidence context for prompt
-        evidence_context = []
-        for idx, ev in enumerate(evidence_records[:12], 1):
-            evidence_context.append(
+        # Format input partitions for prompt
+        # [1] Satellite Observations
+        lat = incident_data.get("latitude")
+        lon = incident_data.get("longitude")
+        satellite_section = [
+            f"- Incident Centroid: {lat}° N, {lon}° E",
+            f"- Region: {incident_data.get('region', 'Unknown')}",
+            f"- Hazard Type: {incident_data.get('hazard_type', 'WILDFIRE')}",
+            f"- Observation Date: {incident_data.get('first_detected') or incident_data.get('event_date')}",
+            f"- Detections Count: {incident_data.get('detection_count', 1)}",
+            f"- Max Radiative Power (FRP): {incident_data.get('max_frp', 'N/A')} MW (Physical sensor metric, NOT verification confidence)",
+            f"- Max Brightness Temp: {incident_data.get('max_brightness', 'N/A')} K",
+            "- CRITICAL TRUTH: Spaceborne thermal hotspots indicate surface thermal anomalies (e.g. agricultural burning, flares, or wildfires). A satellite hotspot is NOT proof of a ground wildfire without external corroboration.",
+        ]
+
+        # [2] Directly Relevant Fetched Ground Evidence
+        direct_section = []
+        for idx, ev in enumerate(direct_evidence[:6], 1):
+            direct_section.append(
                 f"[{idx}] Source: {ev.source_name} ({ev.source_type})\n"
                 f"    Title: {ev.title}\n"
                 f"    URL: {ev.url}\n"
-                f"    Published: {ev.publication_date or 'Undated'}\n"
-                f"    Excerpt: {ev.snippet}\n"
+                f"    Published: {ev.publication_date or 'Unknown / Undated'}\n"
+                f"    Authority: {'Official Agency' if ev.is_official else 'Verified Journalism'}\n"
+                f"    Verified Finding: {ev.finding or ev.snippet}\n"
+                f"    Full Extract: {ev.full_text[:400] if ev.full_text else 'Snippet only'}\n"
             )
+        if not direct_section:
+            direct_section = ["NONE. Zero contemporary on-ground reports or official advisories were retrieved matching this event."]
 
-        evidence_str = "\n".join(evidence_context) if evidence_context else "No external news or advisories linked yet."
+        # [3] Historical / Contextual Material
+        context_section = []
+        for idx, ev in enumerate(contextual_evidence[:4], 1):
+            context_section.append(
+                f"[C-{idx}] {ev.source_name} - {ev.title} ({ev.publication_date or 'Undated'})\n"
+                f"    Note: HISTORICAL/BACKGROUND ONLY. Does NOT corroborate the current satellite detection.\n"
+                f"    Excerpt: {ev.snippet[:200]}\n"
+            )
+        if not context_section:
+            context_section = ["None available."]
+
+        # [4] Excluded Sources
+        excluded_section = excluded_sources[:4] if excluded_sources else ["No sources excluded."]
+
+        # [5] Retrieval Audit & Errors
+        audit_section = []
+        if research_audit:
+            audit_section.append(f"- Search Query: {research_audit.get('query')}")
+            audit_section.append(f"- Sources Discovered: {research_audit.get('sources_discovered', 0)}")
+            audit_section.append(f"- Pages Fetched: {research_audit.get('pages_fetched', 0)}")
+            failed_reqs = research_audit.get("failed_requests", [])
+            audit_section.append(f"- Fetch Failures: {len(failed_reqs)}")
+            for f in failed_reqs[:2]:
+                audit_section.append(f"    * Failed URL: {f.get('url')} - Reason: {f.get('reason')}")
+        else:
+            audit_section = ["Audit metrics available in verification pipeline."]
+
+        # [6] Deterministic Verification Status
+        verif_section = [
+            f"- Deterministic Status: {verif_status} (GROQ MUST NEVER ALTER OR UPGRADE THIS STATUS)",
+            f"- Verifier Rationale: {verif_rationale}",
+            f"- Missing Evidence Required: {', '.join(verif_data.get('missing_evidence', [])) or 'None'}",
+        ]
 
         system_prompt = (
             "You are TerraShield AI's Senior Geospatial Incident Analyst.\n"
-            "Your task is to analyze real hazard observations (wildfires/floods) and produce a clear, "
-            "authoritative, evidence-grounded incident dossier.\n\n"
-            "CRITICAL RULES:\n"
-            "1. Plain English: Write the executive summary in simple, clear, concise language (3 to 5 sentences). Never use jargon like 'six-channel pipeline', 'geospatial inference', or 'causal attribution'.\n"
-            "2. Executive Summary Structure:\n"
-            "   (a) Identify the event and its verified geographic area.\n"
-            "   (b) Explain what the available sources say happened.\n"
-            "   (c) Summarize the documented impact, if supported.\n"
-            "   (d) Explain what evidence was retrieved.\n"
-            "   (e) State the most important uncertainty or limitation.\n"
-            "3. Truthful Causality: Do not claim a fire's root cause unless a reliable retrieved source explicitly supports it. If the cause is unknown, explicitly state: 'Cause not established by the available evidence.'\n"
-            "4. Ground all claims strictly on the provided incident facts and retrieved evidence excerpts.\n"
-            "5. Never hallucinate URLs, fake statistics, casualties, or unverified facts.\n"
-            "6. Output valid JSON adhering strictly to the required schema."
+            "Your task is to analyze real hazard observations and produce a strictly grounded, "
+            "authoritative incident dossier.\n\n"
+            "MANDATORY INTEGRITY CONSTRAINTS:\n"
+            "1. Plain English: Write the executive summary in simple, clear language (3 to 5 sentences).\n"
+            "2. Ground Truth: Summarize ONLY facts supported by the structured inputs below. Never invent fires, deployments, casualties, damage, or citations.\n"
+            "3. Deterministic Status Adherence: You must PRESERVE the deterministic verification status. Groq must NEVER upgrade 'INSUFFICIENT_EVIDENCE' or 'NEEDS_REVIEW' into 'CORROBORATED'.\n"
+            "4. Hotspot vs Ground Fire: If status is 'INSUFFICIENT_EVIDENCE', explicitly state that a spaceborne thermal anomaly was observed by satellite, but ground wildfire status remains unconfirmed because no direct external evidence exists.\n"
+            "5. Historical Material: Historical articles provide background ONLY; never claim they corroborate a current event.\n"
+            "6. Truthful Causality: If root cause is not established by direct sources, explicitly state: 'Cause not established by the available evidence.'\n"
+            "7. Output valid JSON adhering strictly to the required schema."
         )
 
-        hazard_type = incident_data.get('hazard_type', 'WILDFIRE').upper()
-        is_flood = hazard_type == 'FLOOD'
-
-        hazard_metadata_lines = [
-            f"- Name: {incident_data.get('name')}",
-            f"- Hazard Type: {hazard_type}",
-            f"- Region: {incident_data.get('region', 'Unknown')}",
-            f"- Coordinates: {incident_data.get('latitude')}, {incident_data.get('longitude')}",
-            f"- Observations / Detections: {incident_data.get('detection_count', 1)}",
-            f"- First Detected / Event Date: {incident_data.get('first_detected') or incident_data.get('event_date')}",
-            f"- Last Detected: {incident_data.get('last_detected') or 'Ongoing'}",
-            f"- Verification Status: {incident_data.get('verification', {}).get('status', 'INSUFFICIENT_EVIDENCE')}",
-        ]
-        if is_flood:
-            if incident_data.get('river_basin'):
-                hazard_metadata_lines.append(f"- River Basin: {incident_data.get('river_basin')}")
-            if incident_data.get('hydrologic_metrics'):
-                metrics = incident_data.get('hydrologic_metrics', {})
-                hazard_metadata_lines.append(f"- Hydrologic Telemetry: Rainfall={metrics.get('rainfall_48h_mm', 'N/A')}mm, Inundation={metrics.get('inundation_area_sqkm', 'N/A')}km²")
-        else:
-            if incident_data.get('max_frp'):
-                hazard_metadata_lines.append(f"- Max Fire Radiative Power (FRP): {incident_data.get('max_frp')} MW")
-            if incident_data.get('max_brightness'):
-                hazard_metadata_lines.append(f"- Max Brightness Temp: {incident_data.get('max_brightness')} K")
-
         user_content = (
-            f"Analyze the following verified hazard incident:\n\n"
-            f"INCIDENT METADATA:\n"
-            + "\n".join(hazard_metadata_lines)
-            + f"\n\nRETRIEVED SOURCE EVIDENCE RECORDS:\n"
-            f"{evidence_str}\n\n"
-            f"Respond with a JSON object containing the standardized TerraShield Intelligence Report sections:\n"
-            f"1. 'executive_summary': A clear, plain-English paragraph of 3 to 5 sentences following this exact structure: (1) Identify the event and its verified geographic area; (2) Explain what available sources say happened; (3) Summarize documented impacts if supported; (4) Explain what evidence was retrieved; (5) State the most important uncertainty or limitation. Avoid unexplained technical jargon. If root cause is not established by sources, state 'Cause not established by the available evidence.'\n"
-            f"2. 'incident_context': Incident coordinates, geographic region, observation window, originating agency or sensor platform, and verification state.\n"
-            f"3. 'what_happened': Detailed factual narrative of how the hazard developed, propagated, or triggered based strictly on evidence.\n"
-            f"4. 'location_and_geography': Verified geographic scope, administrative districts, terrain, river basin or fuel characteristics.\n"
-            f"5. 'timeline': Array of milestone objects with 'date_time', 'milestone', 'source_ref' for each corroborated event.\n"
-            f"6. 'satellite_and_thermal_observations': Physical sensor context ({'Ground river gauges, IMD precipitation radar, CWC stage data' if is_flood else 'VIIRS/MODIS 375m thermal sensor passes, FRP, Brightness temperature'}).\n"
-            f"7. 'official_warnings': State/national disaster alerts ({'NDMA, KSDMA, CWC, IMD' if is_flood else 'FSI, NDMA, State Forest Dept'}) and independent press dispatches.\n"
-            f"8. 'documented_impacts': Sourced impacts: 'casualties', 'displaced', 'infrastructure', 'environmental'.\n"
-            f"9. 'response_and_mitigation': Deployment of NDRF, armed forces, emergency bridges, aerial surveys, relief camps.\n"
-            f"10. 'evidence_assessment': Synthesis of source credibility, multi-agency corroboration, and news syndication deduplication.\n"
-            f"11. 'uncertainties_and_gaps': Explicit missing facts, disputed casualty counts, and unverified sensor anomalies. State what could not be established.\n"
-            f"12. 'citations': Array of objects with 'claim', 'source_title', 'url' matching authentic sources provided above.\n"
-            f"13. 'why_this_conclusion': Array of objects with 'claim' (key conclusion), 'supporting_sources' (list of source titles/domains), and 'rationale' (concise explanation of how the evidence supports this specific conclusion without overstepping)."
+            f"Synthesize the following hazard intelligence inputs into a standardized report:\n\n"
+            f"=== SECTION 1: NASA FIRMS SATELLITE OBSERVATIONS ===\n"
+            + "\n".join(satellite_section) + "\n\n"
+            f"=== SECTION 2: DIRECTLY RELEVANT FETCHED GROUND EVIDENCE ===\n"
+            + "\n".join(direct_section) + "\n\n"
+            f"=== SECTION 3: HISTORICAL / CONTEXTUAL BACKGROUND (DOES NOT CORROBORATE) ===\n"
+            + "\n".join(context_section) + "\n\n"
+            f"=== SECTION 4: EXCLUDED / MISMATCHED SOURCES ===\n"
+            + "\n".join(excluded_section) + "\n\n"
+            f"=== SECTION 5: RETRIEVAL AUDIT & MISSING INFORMATION ===\n"
+            + "\n".join(audit_section) + "\n\n"
+            f"=== SECTION 6: DETERMINISTIC VERIFICATION OUTCOME ===\n"
+            + "\n".join(verif_section) + "\n\n"
+            f"Respond with a JSON object with keys:\n"
+            f"1. 'executive_summary': A clear 3-5 sentence plain English summary respecting the deterministic status. If status is INSUFFICIENT_EVIDENCE, state that satellite detected a thermal anomaly and ground wildfire status remains unconfirmed.\n"
+            f"2. 'incident_context': Geographic coordinates, region, date, sensor platform, and verification state.\n"
+            f"3. 'what_happened': Detailed factual narrative based strictly on evidence provided.\n"
+            f"4. 'location_and_geography': Verified geographic scope and terrain.\n"
+            f"5. 'timeline': Array of milestone objects with 'date_time', 'milestone', 'source_ref'.\n"
+            f"6. 'satellite_and_thermal_observations': Physical sensor context (FRP, brightness temp, VIIRS passes).\n"
+            f"7. 'official_warnings': Official alerts or state lack thereof.\n"
+            f"8. 'documented_impacts': Verified casualties, damage, or 'Unconfirmed on ground'.\n"
+            f"9. 'response_and_mitigation': Verified deployments or 'No official deployment reported'.\n"
+            f"10. 'evidence_assessment': Synthesis of source credibility, fetch outcomes, and verification status.\n"
+            f"11. 'uncertainties_and_gaps': Explicit missing facts. If cause is unverified, state 'Cause not established by the available evidence.'\n"
+            f"12. 'citations': Array of objects with 'claim', 'source_title', 'url' matching authentic sources.\n"
+            f"13. 'why_this_conclusion': Array of objects with 'claim', 'supporting_sources', and 'rationale'."
         )
 
         url = f"{self.base_url}/chat/completions"
@@ -199,22 +396,23 @@ class GroqAdapter:
                     resp = await client.post(url, headers=headers, json=payload)
 
                     if resp.status_code in (401, 403):
+                        fallback = self.build_safe_fallback_summary(incident_data, verif_status, verif_rationale, direct_evidence, contextual_evidence)
                         return {
                             "status": "auth_error",
-                            "message": f"Groq Authentication failed (HTTP {resp.status_code}): Invalid API key. Check console.groq.com.",
+                            "message": f"Groq Authentication failed (HTTP {resp.status_code}): Invalid API key.",
                             "model_id": self.model,
                             "generated_at": datetime.now(timezone.utc).isoformat(),
-                            "report": None,
+                            "report": fallback,
                         }
 
                     if resp.status_code == 404:
-                        clean_err = self._mask_key(resp.text[:160])
+                        fallback = self.build_safe_fallback_summary(incident_data, verif_status, verif_rationale, direct_evidence, contextual_evidence)
                         return {
                             "status": "model_unavailable",
-                            "message": f"Configured Groq model '{self.model}' is not found or unavailable on Groq Cloud. Please verify GROQ_MODEL in .env.",
+                            "message": f"Configured Groq model '{self.model}' is unavailable on Groq Cloud.",
                             "model_id": self.model,
                             "generated_at": datetime.now(timezone.utc).isoformat(),
-                            "report": None,
+                            "report": fallback,
                         }
 
                     if resp.status_code == 429:
@@ -222,12 +420,13 @@ class GroqAdapter:
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(2.0)
                             continue
+                        fallback = self.build_safe_fallback_summary(incident_data, verif_status, verif_rationale, direct_evidence, contextual_evidence)
                         return {
                             "status": "rate_limited",
-                            "message": "Groq Cloud rate limit reached. Please retry in a few moments.",
+                            "message": "Groq Cloud rate limit reached. Fallback report displayed.",
                             "model_id": self.model,
                             "generated_at": datetime.now(timezone.utc).isoformat(),
-                            "report": None,
+                            "report": fallback,
                         }
 
                     if resp.status_code != 200:
@@ -242,32 +441,33 @@ class GroqAdapter:
                     raw_content = data["choices"][0]["message"]["content"]
                     parsed_report = json.loads(raw_content)
 
+                    # Post-Synthesis Integrity Validation
+                    validated_report = self.validate_groq_report_integrity(
+                        report=parsed_report,
+                        verif_status=verif_status,
+                        incident_data=incident_data,
+                        direct_evidence=direct_evidence,
+                        contextual_evidence=contextual_evidence,
+                    )
+
                     logger.info(f"Successfully generated Groq Cloud report for {incident_data.get('id')} using {self.model}")
                     return {
                         "status": "success",
-                        "message": f"Synthesized detailed incident dossier via Groq Cloud ({self.model}).",
+                        "message": f"Synthesized grounded incident dossier via Groq Cloud ({self.model}).",
                         "model_id": self.model,
                         "generated_at": datetime.now(timezone.utc).isoformat(),
-                        "report": parsed_report,
+                        "report": validated_report,
                     }
 
             except json.JSONDecodeError as e:
                 logger.warning(f"Groq output was not strict JSON: {e}")
+                fallback = self.build_safe_fallback_summary(incident_data, verif_status, verif_rationale, direct_evidence, contextual_evidence)
                 return {
                     "status": "success",
-                    "message": "Report generated in unstructured format.",
+                    "message": "Report generated with structured fallback format.",
                     "model_id": self.model,
                     "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "report": {
-                        "executive_summary": raw_content[:400],
-                        "event_narrative": raw_content,
-                        "contributing_factors": ["Extreme weather conditions"],
-                        "timeline_milestones": [],
-                        "impact_assessment": {},
-                        "conflicting_claims": [],
-                        "evidence_gaps": [],
-                        "citations": [],
-                    },
+                    "report": fallback,
                 }
             except httpx.TimeoutException:
                 last_error = "Groq Cloud request timed out after 35s."
@@ -281,13 +481,13 @@ class GroqAdapter:
                 last_error = clean_err
                 break
 
-        clean_err = self._mask_key(last_error)
+        fallback = self.build_safe_fallback_summary(incident_data, verif_status, verif_rationale, direct_evidence, contextual_evidence)
         return {
             "status": "error",
-            "message": f"Groq Cloud AI summarization could not be completed: {clean_err}",
+            "message": f"Groq Cloud AI summarization could not be completed: {last_error}",
             "model_id": self.model,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "report": None,
+            "report": fallback,
         }
 
 

@@ -3,20 +3,27 @@
 Connects to https://api.search.tinyfish.ai and https://api.fetch.tinyfish.ai
 Preserves authentic source URLs, timestamps, provenance, and authority classifications.
 Never fabricates responses or claims successful API calls when credentials are absent.
+Maintains strict evidence semantics and auditable counters.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 import httpx
 
 from backend.config import settings
+from backend.engine.geo_temporal_validator import (
+    evaluate_temporal_alignment,
+    normalize_utc_timestamp,
+    validate_named_location_match,
+)
 from backend.models.evidence import EvidenceRecord, EvidenceStatus, SourceType
 
 logger = logging.getLogger("terrashield.tinyfish")
 
-# Known authoritative domains for wildfire intelligence (India-First & Global)
+# Known authoritative domains for wildfire & disaster intelligence (Global & India)
 OFFICIAL_DOMAINS = [
     ".gov",
     ".gov.in",
@@ -35,6 +42,7 @@ OFFICIAL_DOMAINS = [
     "mahaforest.gov.in",    # Maharashtra Forest Department
     "odishaforest.in",      # Odisha Forest Department
     "forests.karnataka.gov.in", # Karnataka Forest Department
+    "aranya.gov.in",        # Karnataka Forest Department portal
     "hptdc.in",
     "gov.bc.ca",
     "bcwildfire.ca",
@@ -51,9 +59,10 @@ OFFICIAL_DOMAINS = [
     "fire.ca.gov",
     "gov.yk.ca",
     "gov.nt.ca",
+    "ntca.gov.in",
 ]
 
-NEWS_DOMAINS = [
+VERIFIED_NEWS_DOMAINS = [
     # Indian News Media
     "timesofindia.indiatimes.com",
     "thehindu.com",
@@ -64,6 +73,7 @@ NEWS_DOMAINS = [
     "deccanherald.com",
     "livemint.com",
     "tribuneindia.com",
+    "downtoearth.org.in",
     # Global News Media
     "cbc.ca",
     "reuters.com",
@@ -80,6 +90,8 @@ NEWS_DOMAINS = [
     "cnn.com",
     "aljazeera.com",
     "weather.com",
+    "bloomberg.com",
+    "theguardian.com",
 ]
 
 
@@ -97,10 +109,19 @@ class TinyFishAdapter:
         return bool(self.api_key and len(self.api_key) > 5)
 
     def classify_source(self, url: str, site_name: str, title: str) -> Tuple[SourceType, bool, str]:
-        """Classify source authority based on authentic domain and authority attributes."""
+        """Classify source authority strictly based on authentic domain identity.
+
+        Only genuine government/emergency services receive OFFICIAL_AGENCY.
+        Only recognized news publishers receive NEWS_MEDIA with verified standing.
+        Otherwise UNVERIFIED.
+        """
+        domain = ""
         try:
-            parsed = urlparse(url)
-            domain = parsed.netloc.lower()
+            if url:
+                parsed = urlparse(url)
+                domain = parsed.netloc.lower()
+                if domain.startswith("www."):
+                    domain = domain[4:]
         except Exception:
             domain = ""
 
@@ -113,13 +134,13 @@ class TinyFishAdapter:
         if any(term in domain for term in ["dispatch", "pulsepoint", "broadcastify", "cad."]):
             return SourceType.EMERGENCY_DISPATCH, True, domain
 
-        # Check curated news media domains
-        for news_dom in NEWS_DOMAINS:
+        # Check curated verified news media domains
+        for news_dom in VERIFIED_NEWS_DOMAINS:
             if domain.endswith(news_dom) or news_dom in domain:
                 return SourceType.NEWS_MEDIA, False, domain
 
-        # General news keyword match
-        if any(kw in domain or kw in site_name.lower() for kw in ["news", "times", "post", "herald", "gazette", "tribune", "radio", "press", "reuters"]):
+        # General news keyword match in domain
+        if any(kw in domain for kw in ["news", "times", "post", "herald", "gazette", "tribune", "radio", "press"]):
             return SourceType.NEWS_MEDIA, False, domain
 
         return SourceType.UNVERIFIED, False, domain
@@ -134,9 +155,13 @@ class TinyFishAdapter:
         full_text: Optional[str] = None,
         is_official: bool = False,
     ) -> Dict[str, Any]:
-        """Evaluate evidence quality, relevance criteria, finding, and role."""
+        """Evaluate evidence quality, relevance criteria, finding, and role.
+
+        Enforces strict localized administrative matching and rejects broad country hits.
+        Categorizes historical articles as contextual background rather than direct evidence.
+        """
         combined_text = f"{title} {snippet} {full_text or ''}".lower()
-        score = 0.2
+        score = 0.15
         reasons = []
 
         wildfire_terms = [
@@ -167,41 +192,54 @@ class TinyFishAdapter:
                 found_hazard = []
                 hazard_label = "hazard"
 
+        # 1. Geographic Matching using strict validator (rejects broad country names like 'India')
         loc_match = False
+        loc_diag = ""
         if target_location:
-            loc_lower = target_location.lower()
-            sub_tokens = [
-                tok.strip(" ,&()")
-                for tok in loc_lower.replace("&", ",").split(",")
-                if len(tok.strip(" ,&()")) >= 3
-            ]
-            if loc_lower in combined_text:
-                loc_match = True
-                reasons.append(f"Direct match for target location '{target_location}'")
-            elif any(tok in combined_text for tok in sub_tokens):
-                loc_match = True
-                matched_toks = [tok for tok in sub_tokens if tok in combined_text]
-                reasons.append(f"Regional match for location ({', '.join(matched_toks)})")
+            loc_match, match_type, loc_diag = validate_named_location_match(
+                target_region=target_location,
+                extracted_location=None,
+                text_content=combined_text,
+            )
+            if loc_match:
+                score += 0.35
+                reasons.append(loc_diag)
+            else:
+                reasons.append(f"Geographic mismatch: {loc_diag}")
 
         if found_hazard:
             score += 0.35
             reasons.append(f"Contains {hazard_label} keywords ({', '.join(found_hazard[:3])})")
 
-        if loc_match:
-            score += 0.35
-
+        # 2. Temporal Matching
         date_match = False
+        is_historical = False
         if target_date:
+            target_dt = normalize_utc_timestamp(target_date)
             clean_date = target_date[:10]
-            year = clean_date[:4]
+            target_year = clean_date[:4]
+
+            # Detect mention of target date
             if clean_date in combined_text:
                 score += 0.15
                 date_match = True
                 reasons.append(f"Matches target date '{clean_date}'")
-            elif year in combined_text:
-                score += 0.10
-                date_match = True
-                reasons.append(f"Matches event year '{year}'")
+            elif target_year in combined_text:
+                # Check if text also mentions a DIFFERENT prominent year that indicates historical mismatch
+                historical_years = re.findall(r"\b(201[0-9]|202[0-3])\b", combined_text)
+                if historical_years and target_year not in historical_years and int(target_year) >= 2024:
+                    is_historical = True
+                    reasons.append(f"Historical date mismatch: text refers to {historical_years[0]} rather than target year {target_year}")
+                else:
+                    score += 0.10
+                    date_match = True
+                    reasons.append(f"Matches event year '{target_year}'")
+            else:
+                # Check if it mentions historical years
+                historical_years = re.findall(r"\b(19[0-9]{2}|20[0-2][0-9])\b", combined_text)
+                if historical_years and target_year not in historical_years:
+                    is_historical = True
+                    reasons.append(f"Historical background: refers to earlier year ({historical_years[0]})")
 
         if not reasons:
             reasons.append("General public report")
@@ -209,9 +247,10 @@ class TinyFishAdapter:
         final_score = min(1.0, round(score, 2))
 
         # Qualitative relevance label based on explicit criteria
-        if loc_match and found_hazard:
+        has_content = bool(full_text and len(full_text.strip()) > 30)
+        if loc_match and found_hazard and not is_historical:
             relevance_label = "Relevant"
-        elif loc_match or found_hazard:
+        elif (loc_match or found_hazard) or is_historical:
             relevance_label = "Partial match"
         else:
             relevance_label = "Needs review"
@@ -223,7 +262,7 @@ class TinyFishAdapter:
             first_sentence += "."
         finding = first_sentence[:220] if first_sentence else "Situation update reported for target area."
 
-        # What specific aspect of the incident the source supports
+        # Specific aspect supported
         aspects = []
         if any(term in combined_text for term in ["air force", "iaf", "helicopter", "bambi bucket", "douse", "firefighter", "suppression", "containment", "personnel", "crews"]):
             aspects.append("Ground & aerial suppression operations")
@@ -236,12 +275,14 @@ class TinyFishAdapter:
 
         supports_aspect = "; ".join(aspects) if aspects else "Regional disaster chronology & situational context"
 
-        # Distinguish evidence role
-        if is_official:
+        # Distinguish evidence role strictly
+        if is_historical:
+            evidence_role = "Contextual background (Historical event)"
+        elif is_official:
             evidence_role = "Directly reported facts (Official Agency)"
         elif any(news_key in combined_text for news_key in ["reuters", "thehindu", "ndtv", "indianexpress", "bbc", "pib"]):
             evidence_role = "Directly reported facts (Verified Journalism)"
-        elif relevance_label == "Relevant":
+        elif relevance_label == "Relevant" and (has_content or date_match):
             evidence_role = "Directly reported facts"
         elif relevance_label == "Partial match":
             evidence_role = "Contextual background"
@@ -257,6 +298,9 @@ class TinyFishAdapter:
             "finding": finding,
             "supports_aspect": supports_aspect,
             "evidence_role": evidence_role,
+            "geo_match": loc_match,
+            "date_match": date_match,
+            "is_historical": is_historical,
         }
 
     def calculate_relevance(
@@ -306,17 +350,39 @@ class TinyFishAdapter:
     ) -> Any:
         """Search public web via TinyFish Search API and fetch full content via Fetch API.
 
-        Returns: (evidence_records, message, status) or (evidence_records, message, status, research_audit)
+        Maintains separate, accurately defined counts for:
+        - sources_discovered
+        - unique_urls
+        - fetch_attempts
+        - pages_fetched
+        - failed_requests
+        - pages_extracted
+        - relevant_sources
+        - direct_evidence
+        - independent_sources
+        - contextual_sources
+        - geo_matches
+        - temporal_matches
         """
         now_utc = datetime.now(timezone.utc).isoformat()
-        research_audit = {
+        research_audit: Dict[str, Any] = {
             "query": query,
             "queries_submitted": [query],
             "operations_completed": ["Query Construction"],
             "sources_discovered": 0,
+            "unique_urls": 0,
+            "fetch_attempts": 0,
             "pages_fetched": 0,
             "failed_requests": [],
+            "pages_extracted": 0,
+            "relevant_sources": 0,
+            "direct_evidence": 0,
+            "independent_sources": 0,
+            "contextual_sources": 0,
+            "geo_matches": 0,
+            "temporal_matches": 0,
             "retrieval_timestamps": now_utc,
+            "retrieval_timestamp": now_utc,
         }
 
         if not self.is_configured:
@@ -384,6 +450,7 @@ class TinyFishAdapter:
                     source_type, is_official, domain = self.classify_source(url, site_name, title)
                     clean_source_name = site_name or domain or "Web Source"
 
+                    # Discovered item starts with PARTIAL (snippet discovered, page not yet fetched)
                     evidence_record = EvidenceRecord(
                         id=f"TF-EVID-{idx + 1}-{int(datetime.now().timestamp())}",
                         source_name=clean_source_name,
@@ -400,34 +467,48 @@ class TinyFishAdapter:
                         fetched_at=now_utc,
                         is_official=is_official,
                         domain=domain,
-                        fetch_status=EvidenceStatus.ACTIVE,
+                        fetch_status=EvidenceStatus.PARTIAL,
                         search_query=query,
                         provenance_origin="CURRENT_SESSION",
                     )
                     evidence_list.append(evidence_record)
 
+                research_audit["unique_urls"] = len(seen_urls)
+
                 # Fetch full text for top discovered URLs
                 if do_fetch and evidence_list:
                     fetch_urls = [ev.url for ev in evidence_list[:4]]
+                    research_audit["fetch_attempts"] = len(fetch_urls)
                     try:
                         fetched_pages = await self.fetch_content(fetch_urls)
                         research_audit["operations_completed"].append("TinyFish Fetch API")
                         for ev in evidence_list:
-                            if ev.url in fetched_pages and fetched_pages[ev.url]:
-                                ev.full_text = fetched_pages[ev.url][:4000]
-                                if ev.url in self.last_fetch_results:
-                                    meta = self.last_fetch_results[ev.url]
-                                    if meta.get("published_date"):
-                                        ev.publication_date = meta["published_date"]
-                            elif ev.url in self.last_fetch_errors:
-                                ev.fetch_error = self.last_fetch_errors[ev.url]
-                                ev.fetch_status = EvidenceStatus.FAILED
-                                research_audit["failed_requests"].append({"url": ev.url, "reason": ev.fetch_error})
+                            if ev.url in fetch_urls:
+                                if ev.url in fetched_pages and fetched_pages[ev.url]:
+                                    ev.full_text = fetched_pages[ev.url][:4000]
+                                    ev.fetch_status = EvidenceStatus.ACTIVE
+                                    if ev.url in self.last_fetch_results:
+                                        meta = self.last_fetch_results[ev.url]
+                                        if meta.get("published_date"):
+                                            ev.publication_date = meta["published_date"]
+                                elif ev.url in self.last_fetch_errors:
+                                    ev.fetch_error = self.last_fetch_errors[ev.url]
+                                    ev.fetch_status = EvidenceStatus.FAILED
+                                    research_audit["failed_requests"].append({"url": ev.url, "reason": ev.fetch_error})
+                            else:
+                                # Not attempted in this batch
+                                ev.fetch_status = EvidenceStatus.PARTIAL
+                                ev.fetch_error = "Fetch not attempted (outside top-priority fetch batch)"
                     except Exception as fe:
                         logger.warning(f"Follow-up TinyFish Fetch partially failed: {fe}")
                         research_audit["failed_requests"].append({"url": "batch_fetch", "reason": str(fe)})
+                else:
+                    research_audit["operations_completed"].append("Snippet-only mode (No page fetches requested)")
 
                 research_audit["pages_fetched"] = sum(1 for ev in evidence_list if ev.full_text)
+                research_audit["pages_extracted"] = sum(
+                    1 for ev in evidence_list if ev.full_text and len(ev.full_text.strip()) > 30
+                )
 
                 # Evaluate quality, finding, and aspect supported for all records
                 for ev in evidence_list:
@@ -447,10 +528,30 @@ class TinyFishAdapter:
                     ev.supports_aspect = eval_res["supports_aspect"]
                     ev.evidence_role = eval_res["evidence_role"]
 
+                    if eval_res["relevance_label"] == "Relevant":
+                        research_audit["relevant_sources"] += 1
+                    if "Directly reported" in eval_res["evidence_role"]:
+                        research_audit["direct_evidence"] += 1
+                    if "Contextual background" in eval_res["evidence_role"]:
+                        research_audit["contextual_sources"] += 1
+                    if eval_res.get("geo_match"):
+                        research_audit["geo_matches"] += 1
+                    if eval_res.get("date_match"):
+                        research_audit["temporal_matches"] += 1
+
+                # Calculate independent domains
+                from backend.engine.verifier import verifier
+                indep_domains = verifier.extract_independent_domains(evidence_list)
+                research_audit["independent_sources"] = len(indep_domains)
+
                 research_audit["operations_completed"].append("Relevance & Provenance Evaluation")
                 self.last_audit = research_audit
 
-                msg = f"Discovered {len(raw_results)} sources, successfully fetched {research_audit['pages_fetched']} pages via TinyFish."
+                msg = (
+                    f"Discovered {research_audit['sources_discovered']} sources, "
+                    f"attempted {research_audit['fetch_attempts']} fetches, "
+                    f"successfully fetched {research_audit['pages_fetched']} pages via TinyFish."
+                )
                 if return_audit:
                     return evidence_list, msg, "success", research_audit
                 return evidence_list, msg, "success"
@@ -540,4 +641,3 @@ class TinyFishAdapter:
 
 
 tinyfish_adapter = TinyFishAdapter()
-

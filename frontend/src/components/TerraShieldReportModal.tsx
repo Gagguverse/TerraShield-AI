@@ -898,12 +898,18 @@ export const TerraShieldReportModal: React.FC<TerraShieldReportModalProps> = ({
                                   fontWeight: 700,
                                   padding: '0.15rem 0.45rem',
                                   borderRadius: '4px',
-                                  background: ev.is_official ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-                                  color: ev.is_official ? 'var(--color-verified)' : 'var(--text-secondary)',
-                                  border: `1px solid ${ev.is_official ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.25)'}`,
+                                  background: ev.is_official ? 'rgba(16, 185, 129, 0.15)' : ev.source_type === 'NEWS_MEDIA' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                                  color: ev.is_official ? 'var(--color-verified)' : ev.source_type === 'NEWS_MEDIA' ? '#38bdf8' : 'var(--text-secondary)',
+                                  border: `1px solid ${ev.is_official ? 'rgba(16, 185, 129, 0.3)' : ev.source_type === 'NEWS_MEDIA' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(148, 163, 184, 0.25)'}`,
                                 }}
                               >
-                                {ev.is_official ? 'OFFICIAL AGENCY' : 'VERIFIED JOURNALISM'}
+                                {ev.is_official
+                                  ? 'OFFICIAL AGENCY'
+                                  : ev.source_type === 'NEWS_MEDIA'
+                                  ? 'VERIFIED JOURNALISM'
+                                  : ev.source_type === 'EMERGENCY_DISPATCH'
+                                  ? 'EMERGENCY DISPATCH'
+                                  : 'UNVERIFIED SOURCE'}
                               </span>
 
                               {/* Qualitative relevance badge */}
@@ -1035,9 +1041,27 @@ export const TerraShieldReportModal: React.FC<TerraShieldReportModalProps> = ({
 
                           {/* Publication date vs Retrieval timestamp */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.35rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            <span>Published Date: <strong>{ev.publication_date ? new Date(ev.publication_date).toLocaleDateString() : 'Historical Period'}</strong></span>
+                            <span>Published Date: <strong>{ev.publication_date ? new Date(ev.publication_date).toLocaleDateString() : 'Unknown / Undated'}</strong></span>
                             <span>Actual Retrieval Timestamp: <strong>{new Date(ev.fetched_at).toLocaleString()}</strong></span>
-                            <span>Status: <strong style={{ color: ev.fetch_status === 'ACTIVE' ? 'var(--color-verified)' : 'var(--text-secondary)' }}>{ev.fetch_status === 'ACTIVE' ? 'Successfully Fetched' : 'Discovered (Snippet)'}</strong></span>
+                            <span>
+                              Status:{' '}
+                              <strong
+                                style={{
+                                  color:
+                                    ev.fetch_status === 'ACTIVE'
+                                      ? 'var(--color-verified)'
+                                      : ev.fetch_status === 'FAILED'
+                                      ? 'var(--color-danger)'
+                                      : 'var(--text-secondary)',
+                                }}
+                              >
+                                {ev.fetch_status === 'ACTIVE'
+                                  ? 'Successfully Fetched'
+                                  : ev.fetch_status === 'FAILED'
+                                  ? `Fetch Failed (${ev.fetch_error || 'Access error'})`
+                                  : 'Discovered (Snippet)'}
+                              </strong>
+                            </span>
                           </div>
                         </div>
                       );

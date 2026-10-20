@@ -29,6 +29,12 @@ class VerificationReport(BaseModel):
     missing_evidence: List[str] = Field(default_factory=list, description="Specific gaps preventing corroboration")
     independent_sources_count: int = Field(0, description="Count of distinct independent corroborating sources")
     has_official_advisory: bool = Field(False, description="Whether at least one official agency advisory corroborated")
+    direct_sources_count: int = Field(0, description="Count of directly corroborating contemporary ground evidence sources")
+    contextual_sources_count: int = Field(0, description="Count of historical or regional background sources")
+    pages_fetched_count: int = Field(0, description="Count of successfully fetched full-text pages")
+    verified_region_label: Optional[str] = Field(None, description="Geographically verified region or administrative label")
+    geo_match_confirmed: bool = Field(False, description="Whether spatial alignment was strictly verified")
+    temporal_match_confirmed: bool = Field(False, description="Whether temporal alignment was strictly verified")
     evaluated_at: str = Field(..., description="Timestamp of verification execution")
 
 class Incident(BaseModel):

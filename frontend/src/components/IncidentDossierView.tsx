@@ -634,11 +634,15 @@ export const IncidentDossierView: React.FC<IncidentDossierViewProps> = ({
                         fontWeight: 700,
                         padding: '0.15rem 0.45rem',
                         borderRadius: '3px',
-                        background: ev.is_official ? 'rgba(34, 197, 94, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-                        color: ev.is_official ? 'var(--color-verified)' : 'var(--text-secondary)',
+                        background: ev.is_official ? 'rgba(34, 197, 94, 0.15)' : ev.source_type === 'NEWS_MEDIA' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                        color: ev.is_official ? 'var(--color-verified)' : ev.source_type === 'NEWS_MEDIA' ? '#38bdf8' : 'var(--text-secondary)',
                       }}
                     >
-                      {ev.is_official ? 'OFFICIAL AGENCY' : 'VERIFIED JOURNALISM'}
+                      {ev.is_official
+                        ? 'OFFICIAL AGENCY'
+                        : ev.source_type === 'NEWS_MEDIA'
+                        ? 'VERIFIED JOURNALISM'
+                        : 'PUBLIC SOURCE'}
                     </span>
                     <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{ev.source_name}</strong>
                   </div>

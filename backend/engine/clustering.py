@@ -102,6 +102,8 @@ def cluster_detections_into_incidents(
             incident_lon=avg_lon,
             incident_time_str=primary.timestamp,
             evidence_list=[],
+            incident_region=region,
+            hazard_type="WILDFIRE",
         )
 
         incident = Incident(

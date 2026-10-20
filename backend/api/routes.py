@@ -435,6 +435,8 @@ def _resolve_incident_by_id(incident_id: str):
                     incident_lon=det.longitude,
                     incident_time_str=det.timestamp,
                     evidence_list=[],
+                    incident_region=region,
+                    hazard_type="WILDFIRE",
                 ),
                 data_mode=det.data_mode or state.mode,
             )
@@ -491,11 +493,31 @@ async def get_incident_dossier(incident_id: str):
         impact_summary = {}
         precomputed = None
     else:
-        inc_dict = hist_incident
+        inc_dict = dict(hist_incident)
         evidence_list = hist_incident.get("evidence", [])
         timeline = hist_incident.get("timeline", [])
         impact_summary = hist_incident.get("impact_summary", {})
         precomputed = hist_incident.get("precomputed_report")
+
+        if "verification" not in inc_dict or not inc_dict["verification"]:
+            hist_ev_records = []
+            for ev in evidence_list:
+                if isinstance(ev, EvidenceRecord):
+                    hist_ev_records.append(ev)
+                elif isinstance(ev, dict):
+                    try:
+                        hist_ev_records.append(EvidenceRecord.model_validate(ev))
+                    except Exception:
+                        pass
+            hist_verif = verifier.evaluate(
+                incident_lat=inc_dict.get("latitude", 0.0),
+                incident_lon=inc_dict.get("longitude", 0.0),
+                incident_time_str=inc_dict.get("first_detected") or inc_dict.get("event_date") or "2024-01-01T00:00:00Z",
+                evidence_list=hist_ev_records,
+                incident_region=inc_dict.get("region"),
+                hazard_type=inc_dict.get("hazard_type", "WILDFIRE"),
+            )
+            inc_dict["verification"] = hist_verif.model_dump()
 
     return {
         "status": "success",
@@ -657,23 +679,24 @@ async def investigate_incident(incident_id: str):
         "details": f"{inc_name} ({inc_lat:.4f}° N, {inc_lon:.4f}° E) • {hazard_type} • {det_count} sensor detections",
     })
 
-    # Construct targeted query based strictly on incident metadata
+    # Construct targeted query dynamically based strictly on incident metadata
+    clean_name = inc_name.replace("DEMO — ", "").replace("HISTORICAL EVENT: ", "").strip()
+    clean_region = inc_region.split("(")[0].strip() if inc_region else "Target Area"
+    is_demo_or_hist = (
+        (target_incident and target_incident.data_mode in ("DEMO", "HISTORICAL"))
+        or bool(hist_incident)
+    )
+
     if is_flood:
-        query_str = f"flood landslide situation report {inc_name} {inc_region} NDMA KSDMA CWC {inc_date}"
-    else:
-        name_lower = inc_name.lower()
-        region_lower = inc_region.lower()
-        if "uttarakhand" in name_lower or "uttarakhand" in region_lower:
-            query_str = "Uttarakhand forest fires May 2024 Pauri Garhwal Chamoli FSI NDMA"
-        elif "similipal" in name_lower or "simlipal" in name_lower or "odisha" in region_lower:
-            query_str = "Similipal forest fires March 2021 Mayurbhanj Odisha official report"
-        elif "bandipur" in name_lower or "karnataka" in region_lower:
-            query_str = "Bandipur forest fire February 2019 Chamarajanagar Karnataka official report"
-        elif "thermal anomaly" in name_lower or "thermal hotspot" in name_lower:
-            query_str = f"{inc_region} wildfire forest fire emergency incident {inc_date}"
+        if is_demo_or_hist:
+            query_str = f"flood landslide situation report {clean_name} {clean_region} {inc_date}"
         else:
-            clean_name = inc_name.replace("DEMO — ", "").replace("HISTORICAL EVENT: ", "").strip()
-            query_str = f"{clean_name} {inc_region} wildfire forest fire official news {inc_date}"
+            query_str = f"flood landslide inundation warning {clean_region} {inc_date} official report"
+    else:
+        if is_demo_or_hist:
+            query_str = f"{clean_name} {clean_region} forest fire wildfire official report {inc_date}"
+        else:
+            query_str = f"{clean_region} wildfire forest fire emergency incident {inc_date} official report"
 
     # Stage 2: Searching for relevant sources
     live_new_evidence: List[EvidenceRecord] = []
@@ -682,6 +705,8 @@ async def investigate_incident(incident_id: str):
         "queries_submitted": [query_str],
         "operations_completed": ["Incident Selection", "Query Formulation"],
         "sources_discovered": 0,
+        "unique_urls": 0,
+        "fetch_attempts": 0,
         "pages_fetched": 0,
         "failed_requests": [],
         "retrieval_timestamps": datetime.now(timezone.utc).isoformat(),
@@ -749,27 +774,43 @@ async def investigate_incident(incident_id: str):
         "details": f"Retrieved page extracts from {pages_fetched_count} sources. {failed_requests_count} request(s) failed or inaccessible.",
     })
 
-    # Merge newly retrieved evidence avoiding duplicates by URL
-    for ev in live_new_evidence:
-        ev.provenance_origin = "CURRENT_SESSION"
-        if not any(existing.url == ev.url for existing in evidence_records):
-            evidence_records.append(ev)
-        state.evidence[ev.id] = ev
+    # Merge newly retrieved evidence avoiding duplicates and preventing stale evidence accumulation
+    if live_new_evidence:
+        if target_incident:
+            evidence_records = live_new_evidence
+            target_incident.evidence = evidence_records
+        else:
+            for ev in live_new_evidence:
+                ev.provenance_origin = "CURRENT_SESSION"
+                if not any(existing.url == ev.url for existing in evidence_records):
+                    evidence_records.append(ev)
+        for ev in live_new_evidence:
+            state.evidence[ev.id] = ev
 
     # Stage 4: Checking relevance and evidence
     if target_incident:
-        target_incident.evidence = evidence_records
         target_incident.verification = verifier.evaluate(
             incident_lat=inc_lat,
             incident_lon=inc_lon,
             incident_time_str=target_incident.first_detected,
-            evidence_list=evidence_records,
+            evidence_list=target_incident.evidence,
+            incident_region=target_incident.region,
+            hazard_type=hazard_type,
         )
         verif_status = target_incident.verification.status.value
         verif_rationale = target_incident.verification.rationale
     else:
-        verif_status = "CORROBORATED" if len(evidence_records) >= 2 else "INSUFFICIENT_EVIDENCE"
-        verif_rationale = f"Evaluated {len(evidence_records)} situation reports against geographic and temporal bounds."
+        hist_verif = verifier.evaluate(
+            incident_lat=inc_lat,
+            incident_lon=inc_lon,
+            incident_time_str=hist_incident.get("first_detected") or hist_incident.get("event_date") or "2024-01-01T00:00:00Z",
+            evidence_list=evidence_records,
+            incident_region=inc_region,
+            hazard_type=hazard_type,
+        )
+        hist_incident["verification"] = hist_verif.model_dump()
+        verif_status = hist_verif.status.value
+        verif_rationale = hist_verif.rationale
 
     trace.append({
         "stage": 4,
@@ -803,6 +844,7 @@ async def investigate_incident(incident_id: str):
     groq_res = await groq_adapter.generate_incident_dossier(
         incident_data=incident_payload,
         evidence_records=evidence_records,
+        research_audit=research_audit,
     )
 
     groq_status = groq_res.get("status")
@@ -1010,6 +1052,8 @@ def verify_incident(incident_id: str):
         incident_lon=incident.longitude,
         incident_time_str=incident.first_detected,
         evidence_list=incident.evidence,
+        incident_region=incident.region,
+        hazard_type="WILDFIRE",
     )
     incident.verification = report
     return report
@@ -1180,6 +1224,8 @@ async def search_evidence(req: SearchEvidenceRequest):
             incident_lon=target_incident.longitude,
             incident_time_str=target_incident.first_detected,
             evidence_list=target_incident.evidence,
+            incident_region=target_incident.region,
+            hazard_type="WILDFIRE",
         )
 
     return SearchEvidenceResponse(

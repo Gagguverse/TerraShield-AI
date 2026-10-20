@@ -31,9 +31,10 @@ export const ContextualEvidenceDrawer: React.FC<ContextualEvidenceDrawerProps> =
   if (!isOpen || !incident) return null;
 
   // Search state
-  const defaultQuery = `Forest fire ${incident.name} ${incident.region} India Forest Survey of India advisory`;
+  const isIndia = (incident.region || '').toLowerCase().includes('india');
+  const defaultQuery = `${incident.name} ${incident.region} wildfire official advisory`;
   const [searchQuery, setSearchQuery] = useState(defaultQuery);
-  const [locationParam, setLocationParam] = useState(incident.region || 'India');
+  const [locationParam, setLocationParam] = useState(incident.region || (isIndia ? 'India' : ''));
   const [isSearching, setIsSearching] = useState(false);
   const [searchStatus, setSearchStatus] = useState<{
     type: 'success' | 'warning' | 'error' | 'info';
@@ -92,7 +93,7 @@ export const ContextualEvidenceDrawer: React.FC<ContextualEvidenceDrawerProps> =
   const getSourceBadge = (type: string, isOfficial: boolean) => {
     if (isOfficial || type === 'OFFICIAL_AGENCY') {
       return {
-        label: 'Official Indian Agency',
+        label: 'Official Agency',
         color: 'var(--color-verified)',
         bg: 'var(--color-verified-subtle)',
         border: 'var(--color-verified-border)',
