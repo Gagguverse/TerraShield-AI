@@ -16,15 +16,20 @@
 
 ## 📸 Operational Interface
 
-| Primary Command Dashboard | NASA FIRMS Geospatial Map |
+| Command Overview & ML Suite | Live Orbital Telemetry & Incident Card |
 | :---: | :---: |
-| ![TerraShield Dashboard](frontend/public/guide/step1_hazard.png) | ![Geospatial Map](frontend/public/guide/step2_map.png) |
-| *Multi-hazard command center with live/historical modes and incident selection.* | *Unclustered VIIRS (375m) & MODIS (1km) hotspots on NASA SWIR imagery.* |
+| ![Command Overview](frontend/public/guide/Screenshot%20(71).png) | ![Live Incident Card](frontend/public/guide/Screenshot%20(72).png) |
+| *India overview with 1,500 satellite hotspots, spatial clusters, and ML Analysis Suite.* | *Live orbital pass showing unconfirmed hotspot disclosure and TinyFish trigger.* |
 
-| TinyFish Autonomous Investigation | 11-Section Intelligence Report |
+| TinyFish Autonomous Research Audit | Groq Grounded Intelligence Synthesis |
 | :---: | :---: |
-| ![TinyFish Investigation](frontend/public/guide/step4_investigate.png) | ![Intelligence Report](frontend/public/guide/step5_report.png) |
-| *Real-time research audit tracking discovered snippets, full-page fetches, and failures.* | *Groq-synthesized dossier grounded strictly in verified findings and audit metrics.* |
+| ![TinyFish Audit](frontend/public/guide/Screenshot%20(75).png) | ![Groq Synthesis](frontend/public/guide/Screenshot%20(76).png) |
+| *Audit metrics tracking discovered queries, full-page extractions, and official source badges.* | *Grounded synthesis strictly answering structured questions without status upgrades.* |
+
+| AI Investigation Lifecycle (6 Stages) | NASA EOSDIS GIBS Thermal Satellite |
+| :---: | :---: |
+| ![AI Investigation Lifecycle](frontend/public/guide/Screenshot%20(74).png) | ![NASA EOSDIS Thermal Satellite](frontend/public/guide/Screenshot%20(67).png) |
+| *Deterministic 6-stage lifecycle from hotspot selection to evidence verification.* | *Global Long-Wave Infrared (11.45 μm) daily composite via NASA EOSDIS GIBS.* |
 
 ---
 
