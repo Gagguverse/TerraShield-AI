@@ -1,22 +1,47 @@
 # 🛡️ TerraShield AI — India-First Multi-Hazard Intelligence Platform
-## Wildfire + Flood + Thermal Imaging + Evidence-Grounded AI
+## Wildfire + Flood + Thermal Computer Vision + Evidence-Grounded AI
 
-> **TerraShield AI** transforms raw orbital hazard observations into explainable, source-grounded disaster intelligence. Built with an **India-first geospatial focus**, it integrates **NASA FIRMS satellite thermal observations**, **hydrologic flood telemetry**, **NASA GIBS Shortwave Infrared (SWIR) imagery**, **TinyFish autonomous web retrieval**, and **Groq Cloud GPT-OSS source-grounded intelligence synthesis**.
+> **TerraShield AI** transforms raw orbital hazard observations into explainable, source-grounded disaster intelligence. Built with an **India-first geospatial focus**, it integrates **NASA FIRMS satellite thermal observations**, **NASA GIBS Shortwave Infrared (SWIR) imagery**, **hydrologic flood intelligence**, **computer vision models (U-Net thermal segmentation & pretrained YOLO fire/smoke detection)**, **TinyFish autonomous web retrieval**, and **Groq Cloud source-grounded intelligence synthesis**.
 
 ---
 
 ## 📌 1. Product Vision & Architecture
 
 TerraShield AI solves the fundamental credibility gap in disaster dashboards:
-1. **Satellite Hotspots ≠ Confirmed Wildfires**: Orbital thermal anomalies trigger from industrial flares, stubble burning, and solar glint. TerraShield unclusters individual raw detections by default, explains spatial resolution limits, and requires independent corroborating field evidence.
-2. **Floods Are Non-Combustive**: Flood intelligence uses a completely separate pipeline based on IMD precipitation anomalies, CWC river stages, and microwave SAR radar, never conflating fire thermal alerts with inundation.
-3. **Transparent Thermal Imaging Hierarchy**:
-   - **Level 1 (Operational)**: VIIRS (375m) & MODIS (1km) radiometric attributes (Brightness TI4/TI5, Fire Radiative Power in MW, confidence).
-   - **Level 2 (Operational)**: NASA EOSDIS GIBS False-Color Shortwave Infrared (SWIR Bands M11-I2-I1) and Daily True-Color imagery viewer.
-   - **Level 3 (Architectural Roadmap)**: FLIR radiometric thermal computer vision honestly disclosed as requiring calibrated 8–14μm infrared datasets rather than misapplying standard RGB models.
-4. **Evidence Grounding via TinyFish + Groq Cloud**:
-   - One-click **"Investigate with TinyFish + Groq"** retrieves official agency bulletins (NDMA, KSDMA, FSI, IMD) and credentialed journalism.
-   - Generates an 11-section **TerraShield Intelligence Report** structured with executive summaries *before* the source-link list.
+
+1. **Satellite Hotspots ≠ Confirmed Wildfires**:
+   - Orbital thermal anomalies trigger from industrial flaring, agricultural stubble burning, and solar reflections.
+   - TerraShield displays unclustered raw detections by default, explains sensor footprint limits (VIIRS 375m / MODIS 1km), and explicitly discloses that satellite thermal anomalies alone are unconfirmed ground wildfires until independent field corroboration is established.
+
+2. **Floods Are Non-Combustive (Strict Operational Separation)**:
+   - Wildfires and hydrologic inundations are processed through distinct data models and pipelines.
+   - **Current Operational Status**: TerraShield features authentic, verified historical disaster dossiers (e.g., Wayanad 2024 debris flow, Chamoli 2021 flash flood) with authentic IMD precipitation telemetry, CWC river gauge records, and KSDMA situation reports.
+   - **Live Monitoring Status**: In live monitoring mode, when river gauges report safe stages, the system displays an **honest empty state** ("No qualifying flood anomaly detected in current observation window") rather than fabricating artificial alerts.
+   - **Roadmap / Coming Soon**: Fully automated real-time ingestion pipelines for live Central Water Commission (CWC) telemetry and automated Sentinel-1 SAR microwave flood extent mapping are under active development and **not yet fully operational**.
+
+3. **Multi-Tier Thermal Imaging & Computer Vision Hierarchy**:
+   - **Level 1 (Operational Satellite Radiometry)**: NASA FIRMS VIIRS (375m) & MODIS (1km) radiometric attributes (Brightness TI4/TI5, Fire Radiative Power in MW, satellite confidence).
+   - **Level 2 (Operational Orbital Imagery)**: NASA EOSDIS GIBS False-Color Shortwave Infrared (SWIR Bands M11-I2-I1) and Daily True-Color imagery viewer.
+   - **Level 3 (Operational Computer Vision Suite & Transparent Limitations)**:
+     - **U-Net Thermal Hot-Region Segmentation**: Custom PyTorch U-Net architecture (`n_channels=1, n_classes=1, bilinear=True`, ~4.3M parameters) trained on the IGNITE thermal fire dataset (`Kyoma001/IGNITE-fire-dataset`, CC BY 4.0) to segment thermal hot regions ($\ge 80^\circ\text{C}$, `mask_80c`).
+       - **Reported Test Metrics**: Test Dice **0.276**, Test IoU **0.194** on held-out sequence 0004.
+       - **Honest Disclosure**: The model did not converge well and is an **experimental baseline, not production-ready**. It predicts thermal hot regions ($\ge 80^\circ\text{C}$), not confirmed fires. No temperatures or geographic coordinates are fabricated.
+     - **Pretrained YOLO Fire & Smoke Detection**: Bounding-box detection for `fire` and `smoke` using Ultralytics YOLOv8n.
+       - **Checkpoint Provenance**: Uses an **externally pretrained checkpoint** (`rahabdev/fire-smoke-yolov8n`, Hugging Face, AGPL-3.0). It was **NOT trained by TerraShield**.
+     - **Strict Telemetry Isolation**: Thermal AI computer vision outputs are strictly segregated from satellite FIRMS radiometry.
+
+4. **Deterministic Evidence Grounding via TinyFish + Groq Cloud**:
+   - **Autonomous Retrieval & Extraction**: TinyFish autonomous search (`api.search.tinyfish.ai`) and page extraction (`api.fetch.tinyfish.ai`).
+   - **Strict Semantics & Research Auditing**: Discovered search snippets start as `PARTIAL` and cannot corroborate an event alone; only successfully fetched pages become `ACTIVE`. Real HTTP fetch errors (e.g., 403 paywalls) are recorded and displayed. Auditable metrics track discovered URLs, fetch attempts, successful extractions, failures, relevant sources, and direct vs. contextual sources.
+   - **Deterministic Verifier (`verifier.py` & `geo_temporal_validator.py`)**:
+     - **Wire Service Syndication Deduplication**: Multiple newspapers reprinting the identical wire dispatch (e.g., PTI, ANI, Reuters, AP) are deduplicated into **1 independent reporting entity**.
+     - **Localized Administrative Matching**: Strict bounding box and district-level validation. Broad country matches (e.g., "India") or distant districts are rejected as direct corroboration.
+     - **72-Hour Temporal Window**: **Historical articles provide background context only and MUST NOT corroborate a current incident**.
+     - **Mathematical Scoring**: Replaces arbitrary constants with dynamic uncertainty and confidence scores grounded in independent source counts, proximity, and official advisories.
+   - **Constrained Groq Cloud Synthesis (`groq_adapter.py`)**:
+     - Groq receives 6 strictly partitioned input sections (satellite telemetry, direct evidence, contextual history, excluded sources, retrieval audit, deterministic status).
+     - **Groq is explicitly prohibited from deciding or upgrading incident corroboration status**.
+     - Automated post-synthesis validation ensures that any ungrounded claims are replaced with a safe, evidence-grounded fallback summary.
 
 ---
 
@@ -28,48 +53,55 @@ flowchart TD
         FIRMS["NASA FIRMS API<br/>VIIRS S-NPP / NOAA-20 (375m)<br/>Live NRT & Historical"]
         GIBS["NASA EOSDIS GIBS<br/>TrueColor & SWIR FalseColor<br/>Bands M11-I2-I1 (375m)"]
         TF["TinyFish Engine<br/>api.search.tinyfish.ai<br/>api.fetch.tinyfish.ai"]
-        CWC["Indian Hydrologic Telemetry<br/>IMD Precipitation AWS & CWC Gauges"]
+        IMD["Indian Hydrologic Records<br/>IMD Precipitation AWS & CWC Gauges<br/>(Historical Curated Telemetry)"]
     end
 
     subgraph BackendCore["FastAPI Intelligence Engine (Port 8000)"]
         FA["FIRMS Adapter & Cache<br/>Exponential Backoff & Hotspot Attribution"]
         FLA["Flood & Basin Adapter<br/>Honest Empty States & Basin Risk"]
         Cluster["Spatial Clustering Engine<br/>Radius-based Centroid Grouping"]
-        VE["Deterministic Verifier<br/>Spatial-Temporal Match & Provenance"]
-        TFA["TinyFish Adapter<br/>Autonomous Search & Page Fetch"]
-        GROQ["Groq Cloud Adapter<br/>GPT-OSS 11-Section Synthesis"]
+        GTV["Geo-Temporal Validator<br/>District Bounding Boxes & 72h Window"]
+        VE["Deterministic Verifier<br/>Wire Syndication Dedup & Mathematical Scoring"]
+        ML_UNET["U-Net Thermal Segmenter<br/>IGNITE Baseline (Dice 0.28, IoU 0.19)<br/>mask_80c >= 80°C (Experimental)"]
+        ML_YOLO["Pretrained YOLOv8n Detector<br/>rahabdev/fire-smoke-yolov8n<br/>(Externally Pretrained - Not Trained by Us)"]
+        TFA["TinyFish Adapter<br/>Autonomous Search & Page Fetch Audit"]
+        GROQ["Constrained Groq Adapter<br/>6-Partition Input & Post-Synthesis Validation"]
     end
 
     subgraph FrontendApp["React 19 + TypeScript Operational UI (Port 5173)"]
         Map["Leaflet Intelligence Map<br/>Unclustered Hotspots & NASA SWIR Basemap"]
         Detail["Floating Incident Card<br/>Investigate with TinyFish + Groq"]
-        Report["TerraShield Intelligence Report<br/>11 Standardized Sections & Citations"]
+        MLSuite["Thermal & ML Analysis Suite<br/>U-Net Mask & YOLO Bounding Boxes"]
+        Report["TerraShield Intelligence Report<br/>11 Sections, Audit Counters & Badges"]
         Demo["Full-Screen Guided Demo<br/>7-Step Wayanad Disaster Tour"]
         Archive["Historical Intelligence Library<br/>India-First Curated Disaster Records"]
     end
 
     FIRMS --> FA
     GIBS --> Map
-    CWC --> FLA
+    IMD --> FLA
     FA --> Cluster
-    Cluster --> VE
+    Cluster --> GTV
+    GTV --> VE
     FLA --> VE
     TF --> TFA
     TFA --> GROQ
     GROQ --> Report
     VE --> FrontendApp
+    ML_UNET --> MLSuite
+    ML_YOLO --> MLSuite
 ```
 
 ---
 
 ## 🇮🇳 3. India-First Historical Disaster Library
 
-TerraShield AI includes a curated library of verified real disasters with complete official documentation:
+TerraShield AI includes a curated library of verified real disasters with authentic official documentation:
 
 1. **Wayanad Flash Flood & Debris Disaster (Kerala, July 30, 2024)**:
-   - 572 mm / 48h extreme precipitation anomaly at Vythiri AWS.
+   - 572 mm / 48h extreme precipitation anomaly at Vythiri AWS station.
    - 8.2 km channelized debris runout along Iruvanipuzha River destroying Chooralmala bridge.
-   - Grounded in KSDMA Situation Reports, IMD bulletins, PIB Defence, and The Hindu field reporting.
+   - Grounded in KSDMA Situation Reports, IMD bulletins, PIB Defence, and verified field reporting.
 2. **Chamoli Glacial Rockslide & Flash Flood (Uttarakhand, Feb 7, 2021)**:
    - Ronti peak rock-ice avalanche triggering Rishi Ganga & Dhauli Ganga flash flood.
    - Tapovan Vishnugad hydel project inundation; verified via GSI, ISRO, and NDMA.
@@ -79,7 +111,13 @@ TerraShield AI includes a curated library of verified real disasters with comple
 4. **Uttarakhand Western Himalayan Forest Fire Complex (Uttarakhand, May 2024)**:
    - Severe pre-monsoon fires across Garhwal & Kumaon pine forests.
    - Peak satellite FRP exceeding 340 MW; verified via Forest Survey of India (FSI) & MoEFCC.
-5. **International Benchmarks**:
+5. **Similipal Biosphere Reserve Fire (Odisha, March 2021)**:
+   - High-intensity fires across Mayurbhanj core and buffer zones.
+   - Verified via Odisha Forest Department and Principal Chief Conservator of Forests bulletins.
+6. **Bandipur Tiger Reserve Fire (Karnataka, Feb 2019)**:
+   - Major dry-season forest fire affecting over 4,800 hectares of deciduous forest.
+   - Corroborated through Karnataka Forest Department and ISRO Bhuvan satellite monitoring.
+7. **International Benchmarks**:
    - Donnie Creek Wildfire Complex (British Columbia, Canada, 2023) — 571,000 ha burn area.
    - Tunnel 5 Columbia River Gorge Fire (Washington/Oregon, USA, 2023).
 
@@ -87,19 +125,19 @@ TerraShield AI includes a curated library of verified real disasters with comple
 
 ## 🔬 4. The 11-Section TerraShield Intelligence Report
 
-When an analyst clicks **"Investigate with TinyFish + Groq"**, the system executes end-to-end evidence discovery and synthesizes a structured intelligence report presented *before* the source records:
+When an analyst clicks **"Investigate with TinyFish + Groq"**, the platform executes full evidence discovery, deterministic verification, and constrained synthesis:
 
-1. **Executive Summary**: High-level synthesis of verified facts and root causes.
-2. **What Happened**: Clear physical description of event initiation and progression.
+1. **Executive Summary**: High-level synthesis grounded strictly in verified findings and deterministic status.
+2. **What Happened**: Objective description of event initiation, location, and progression.
 3. **Location and Geographic Context**: Administrative hierarchy, river basin / ecozone, and centroid coordinates.
-4. **Event Timeline**: Chronological milestone progression with source attribution.
+4. **Event Timeline**: Chronological milestone progression with explicit source attribution.
 5. **Satellite and Thermal Observations**: Radiative energy (FRP), brightness temperature, and sensor footprint limitations.
-6. **Official Warnings and Independent Corroboration**: Warnings from IMD, SDMAs, and credentialed journalists.
-7. **Documented Impacts**: Quantified casualties, displacement figures, infrastructure loss, and environmental damage.
-8. **Response and Mitigation Updates**: Armed forces, NDRF, SDRF, and civil relief coordination.
-9. **Evidence Assessment**: Spatial-temporal congruence scoring across collected records.
-10. **Uncertainties, Conflicting Claims, and Data Limitations**: Revisit latency, cloud cover constraints, and non-authoritative AI boundaries.
-11. **Sources and Evidence**: Fully clickable direct links to authentic government bulletins and news articles.
+6. **Official Warnings and Independent Corroboration**: Advisories from NDMA/SDMAs, IMD, FSI, and verified journalism.
+7. **Documented Impacts**: Casualties, displacement figures, infrastructure damage, and environmental impact.
+8. **Response and Mitigation Updates**: Armed forces, NDRF, SDRF, and civil relief deployment.
+9. **Evidence Assessment**: Audit counters (discovered, fetched, failed, direct, contextual, independent entities).
+10. **Uncertainties, Conflicting Claims, and Data Limitations**: Revisit latency, cloud cover, and AI decision-support boundaries.
+11. **Sources and Evidence**: Clickable source links labeled honestly (`OFFICIAL AGENCY`, `VERIFIED JOURNALISM`, `EMERGENCY DISPATCH`, `UNVERIFIED SOURCE`).
 
 ---
 
@@ -114,7 +152,10 @@ When an analyst clicks **"Investigate with TinyFish + Groq"**, the system execut
   - Python 3.12 + FastAPI + Uvicorn
   - Pydantic v2 data models
   - HTTPX asynchronous client with exponential backoff & disk caching
-  - Pytest test suite (45 automated tests)
+  - PyTorch & Torchvision (U-Net thermal segmentation)
+  - Ultralytics (YOLOv8n fire/smoke inference)
+  - Pillow & NumPy (radiometric image transformation & visualization)
+  - Pytest test suite (**63 automated tests passing**)
 
 ---
 
@@ -133,12 +174,16 @@ TINYFISH_API_KEY=your_tinyfish_key_here
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-120b
 
+# Thermal & ML Model Checkpoints (Optional Overrides)
+THERMAL_UNET_CHECKPOINT=backend/ml/models/unet_ignite_best.pt
+THERMAL_YOLO_CHECKPOINT=backend/ml/models/yolo_pretrained/best.pt
+
 # Operational Defaults
 DATA_MODE=HISTORICAL_SAMPLE
 PORT=8000
 ```
 
-> **Security Guarantee**: All credentials remain strictly server-side. The frontend client never receives secret API keys.
+> **Security Guarantee**: All credentials remain strictly server-side. The frontend client never receives secret API keys. Local training data and virtual environments are excluded via `.gitignore`.
 
 ---
 
@@ -177,7 +222,7 @@ Visit the operational interface at **`http://localhost:5173`** and the interacti
 Run the full automated test suite:
 
 ```bash
-# Run all backend pytest tests (45 tests)
+# Run all backend pytest tests (63 automated tests)
 python -m pytest tests -v
 
 # Run frontend TypeScript typecheck and production build
@@ -185,18 +230,24 @@ cd frontend
 npm run build
 ```
 
-### Verified Test Results:
-- `tests/test_api.py`: Health checks, detection pagination, incident grouping, and mode switching.
-- `tests/test_dossier_and_flood.py`: Honest empty flood states, Wayanad disaster demo, historical search, 11-section report schema, thermal capabilities disclosure, and key masking.
-- `tests/test_firms_adapter.py`: Live FIRMS URL construction, HTTP 502 exponential retry backoff, disk caching, and attribute normalization.
-- `tests/test_tinyfish_adapter.py`: Domain authority classification, syndication deduplication, and safe error states.
-- `tests/test_verifier.py`: Haversine great-circle distance, temporal window constraints, and explainable status verdicts.
+### Verified Test Results (63 Passed, 0 Failed):
+- `tests/test_api.py` (15 tests): Health checks, detection pagination, incident grouping, ML status endpoints, and mode switching.
+- `tests/test_dossier_and_flood.py` (12 tests): Honest empty flood states, Wayanad disaster demo, historical search, 11-section report schema, thermal capabilities disclosure, and key masking.
+- `tests/test_evidence_integrity.py` (11 tests): Zero successful fetch semantics, wire syndication deduplication, out-of-bounds geographic filtering, 72-hour temporal windows, Groq guardrail fallbacks, and unconfirmed hotspot disclosures.
+- `tests/test_firms_adapter.py` (12 tests): Live FIRMS URL construction, HTTP 502 exponential retry backoff, disk caching, and attribute normalization.
+- `tests/test_tinyfish_adapter.py` (6 tests): Research audit counters, partial vs. active statuses, HTTP 403 error preservation, and localized query generation.
+- `tests/test_verifier.py` (7 tests): Haversine distance, temporal window constraints, independent domain deduplication, and mathematical uncertainty calculation.
 
 ---
 
 ## ⚠️ 9. Scientific Limitations & Ethical Boundaries
 
-1. **Satellite Latency**: Low-Earth-orbit satellites (VIIRS S-NPP / NOAA-20 / MODIS) observe a location 2–4 times per 24-hour cycle. Detections represent an orbital snapshot, not real-time video surveillance.
-2. **Cloud Cover Obscuration**: Monsoon cloud cover frequently obscures optical sensors during peak flash flood events. Microwave radar (Sentinel-1 SAR) and ground automated weather stations (IMD AWS) are required for non-optical verification.
-3. **Thermal AI Generalization**: Standard RGB models (such as YOLOv8 trained on COCO) cannot be claimed as functional on radiometric long-wave infrared (LWIR) data without calibrated thermal datasets. TerraShield transparently declares Level 3 thermal CV as an architectural roadmap requirement.
-4. **AI Decision Support**: Groq Cloud GPT-OSS provides rapid evidence synthesis and discrepancy analysis. It is an analytical decision-support tool, not an official emergency command authority.
+1. **Satellite Latency & Revisit Geometry**: Low-Earth-orbit satellites (VIIRS S-NPP / NOAA-20 / MODIS) pass over a location only 2–4 times per 24-hour cycle. Hotspot detections represent an instantaneous orbital snapshot, not real-time video surveillance.
+2. **Cloud Cover & Optical Obscuration**: Monsoon cloud cover frequently obscures optical and thermal sensors. Microwave radar (Sentinel-1 SAR) and ground automated weather stations (IMD AWS) are required for all-weather hydrologic monitoring.
+3. **Thermal Computer Vision Limitations (Honest Disclosure)**:
+   - The U-Net thermal hot-region model trained on IGNITE data achieved **Dice 0.276 / IoU 0.194** on held-out test data. It is an **experimental baseline and must not be used as a production fire detector**.
+   - The YOLO fire/smoke detector uses an **externally pretrained checkpoint** (`rahabdev/fire-smoke-yolov8n`) and was **NOT trained by TerraShield**.
+   - Standard RGB models cannot be naively assumed to generalize across radiometric long-wave infrared (LWIR) data without domain-specific radiometric calibration.
+4. **Flood Feature Operational Boundaries**:
+   - Automated real-time streaming of live CWC river stages and automated SAR flood mapping are **roadmap features**. In current live mode, river stages default to an honest empty state when gauges are within safe bounds.
+5. **AI Decision Support vs. Command Authority**: Groq Cloud GPT-OSS provides rapid evidence synthesis and discrepancy analysis. It is an analytical decision-support tool, not an official emergency command authority.
