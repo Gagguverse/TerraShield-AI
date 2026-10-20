@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![Automated Tests](https://img.shields.io/badge/Tests-63%20Passed-brightgreen)](https://github.com/Gagguverse/TerraShield-AI)
+[![Automated Tests](https://img.shields.io/badge/Tests-65%20Passed-brightgreen)](https://github.com/Gagguverse/TerraShield-AI)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status: Prototype](https://img.shields.io/badge/Status-Operational%20Prototype-orange)](https://github.com/Gagguverse/TerraShield-AI)
 
@@ -447,20 +447,20 @@ python -m pytest tests -v
 ============================= test session starts =============================
 platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
 rootdir: F:\screenshots
-collected 63 items
+collected 65 items
 
-tests/test_api.py ...............                                        [ 23%]
-tests/test_dossier_and_flood.py ............                             [ 42%]
-tests/test_evidence_integrity.py ...........                             [ 60%]
-tests/test_firms_adapter.py ............                                 [ 79%]
-tests/test_tinyfish_adapter.py ......                                    [ 88%]
+tests/test_api.py .................                                      [ 26%]
+tests/test_dossier_and_flood.py ............                             [ 44%]
+tests/test_evidence_integrity.py ...........                             [ 61%]
+tests/test_firms_adapter.py ............                                 [ 80%]
+tests/test_tinyfish_adapter.py ......                                    [ 89%]
 tests/test_verifier.py .......                                           [100%]
 
-======================= 63 passed, 1 warning in 35.86s ========================
+======================= 65 passed, 1 warning in 28.65s ========================
 ```
 
 - **`test_evidence_integrity.py` (11 tests)**: Validates that zero successful fetches cannot corroborate, wire syndications count as one source, out-of-bounds locations are rejected, historical articles cannot corroborate current events, Groq guardrails catch hallucinations, and satellite-only anomalies disclose unconfirmed ground status.
-- **`test_api.py` (15 tests)**: Validates health checks, incident pagination, data modes, and ML inference endpoints.
+- **`test_api.py` (17 tests)**: Validates health checks, incident pagination, data modes, ML inference endpoints, compiled frontend website serving at `/`, and SPA route fallback integrity.
 - **`test_firms_adapter.py` (12 tests)**: Validates live URL construction, HTTP 502 exponential retry backoff, disk caching, and attribute normalization.
 - **`test_dossier_and_flood.py` (12 tests)**: Validates honest empty flood states, 11-section report schema compliance, and API key masking.
 - **`test_tinyfish_adapter.py` (6 tests)**: Validates research audit counters, partial vs. active statuses, and HTTP 403 preservation.

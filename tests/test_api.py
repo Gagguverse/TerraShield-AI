@@ -333,3 +333,28 @@ def test_fire_detect_endpoint():
     assert high_resp.status_code == 200
     high_data = high_resp.json()
     assert high_data["detection_count"] <= data["detection_count"]
+
+
+def test_root_serves_website():
+    """Verify that GET / serves the compiled frontend HTML website."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert '<div id="root"></div>' in response.text
+    assert "TerraShield AI" in response.text
+
+
+def test_spa_fallback_and_api_404():
+    """Verify that SPA fallback returns index.html for client routes, while /api routes 404 as JSON."""
+    # SPA fallback for frontend client route
+    spa_resp = client.get("/history/chamoli")
+    assert spa_resp.status_code == 200
+    assert "text/html" in spa_resp.headers.get("content-type", "")
+    assert '<div id="root"></div>' in spa_resp.text
+
+    # Unmapped API route must NOT return HTML fallback
+    api_resp = client.get("/api/unmapped-endpoint-test")
+    assert api_resp.status_code == 404
+    assert "application/json" in api_resp.headers.get("content-type", "")
+    assert api_resp.json()["detail"] == "Not Found"
+

@@ -19,7 +19,26 @@ import type {
   FireDetectResponse,
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+function resolveApiBase(): string {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) {
+    return '/api';
+  }
+  // When running in browser and deployed on a non-localhost host (such as onrender.com),
+  // always use relative '/api' on the same deployed origin even if envUrl points to localhost.
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    if (envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) {
+      return '/api';
+    }
+  }
+  return envUrl.replace(/\/+$/, '');
+}
+
+const API_BASE = resolveApiBase();
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
