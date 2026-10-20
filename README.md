@@ -44,9 +44,9 @@
 7. [System Architecture & Technology Stack](#-7-system-architecture--technology-stack)
 8. [Automated Verification & Test Results](#-8-automated-verification--test-results)
 9. [Quick Start & Installation](#-9-quick-start--installation)
-10. [Environment Configuration (`.env`)](#-10-environment-configuration-env)
-11. [Scope, Known Limitations & Roadmap](#-11-scope-known-limitations--roadmap)
-12. [Credits & Provenance](#-12-credits--provenance)
+10. [Scope, Known Limitations & Roadmap](#-11-scope-known-limitations--roadmap)
+11. [Credits & Provenance](#-12-credits--provenance)
+
 
 ---
 
@@ -348,24 +348,7 @@ npm run dev
 
 ---
 
-## ⚙️ 10. Environment Configuration (`.env`)
-
-| Variable | Required? | Default | Description |
-| :--- | :---: | :--- | :--- |
-| `NASA_FIRMS_MAP_KEY` | Optional | `""` | NASA FIRMS MAP key for live satellite thermal ingestion. If absent, fallback sample data is served. |
-| `TINYFISH_API_KEY` | Optional | `""` | TinyFish autonomous search & page extraction key. If absent, curated verified evidence dossiers are used. |
-| `GROQ_API_KEY` | Optional | `""` | Groq Cloud API key for high-speed GPT-OSS synthesis. If absent, pre-synthesized verified dossiers are served. |
-| `GROQ_MODEL` | Optional | `openai/gpt-oss-120b` | Target Groq model identifier (e.g., `llama-3.3-70b-versatile` or `openai/gpt-oss-120b`). |
-| `DATA_MODE` | Optional | `HISTORICAL_SAMPLE` | Startup mode: `LIVE` (real FIRMS), `DEMO` (Wayanad disaster tour), or `HISTORICAL_SAMPLE`. |
-| `THERMAL_UNET_CHECKPOINT` | Optional | `backend/ml/models/unet_ignite_best.pt` | Path to trained PyTorch U-Net checkpoint. |
-| `THERMAL_YOLO_CHECKPOINT` | Optional | `backend/ml/models/yolo_pretrained/best.pt` | Path to pretrained YOLO fire/smoke checkpoint. |
-| `PORT` | Optional | `8000` | Port for the FastAPI backend server. |
-
-> **Security Guarantee**: All credentials remain strictly server-side. The frontend client never receives secret API keys. Local training data (`datasets/`) and large virtual environments (`.ml_venv/`) are strictly gitignored.
-
----
-
-## 🔭 11. Scope, Known Limitations & Roadmap
+## 🔭 10. Scope, Known Limitations & Roadmap
 
 ### Current Operational Capabilities
 - Live NASA FIRMS VIIRS & MODIS satellite hotspot ingestion with radius clustering.
@@ -390,7 +373,7 @@ npm run dev
 
 ---
 
-## 📜 12. Credits & Provenance
+## 📜 11. Credits & Provenance
 
 - **NASA FIRMS**: NASA Land, Atmosphere Near-real-time Capability for EOS (LANCE), Earth Observing System Data and Information System (EOSDIS).
 - **NASA GIBS**: Global Imagery Browse Services, Earth Science Data and Information System (ESDIS).
