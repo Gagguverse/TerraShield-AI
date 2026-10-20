@@ -53,7 +53,8 @@ Thumbs.db
 
 # Large training datasets (>1.7 GB: IGNITE, DFire)
 datasets/
-data/
+/data/
+!backend/data/
 
 # Model caches and downloader artifacts
 .cache/

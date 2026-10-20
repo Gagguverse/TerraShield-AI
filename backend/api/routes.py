@@ -14,7 +14,10 @@ from backend.adapters.flood_adapter import flood_adapter
 from backend.adapters.groq_adapter import groq_adapter
 from backend.adapters.tinyfish_adapter import tinyfish_adapter
 from backend.config import settings
-from backend.data.fixtures import get_demo_incidents
+try:
+    from backend.data.fixtures import get_demo_incidents
+except ImportError:
+    get_demo_incidents = None
 from backend.engine.clustering import cluster_detections_into_incidents
 from backend.engine.verifier import verifier
 from backend.models.analytics import AnalyticsSummary, DayDetectionCount
@@ -50,17 +53,20 @@ class AppState:
         self.evidence.clear()
 
         if mode == "DEMO":
-            demo_incidents = get_demo_incidents()
-            for inc in demo_incidents:
-                self.incidents[inc.id] = inc
-                if inc.primary_detection:
-                    self.detections.append(inc.primary_detection)
-                for det in inc.detections:
-                    if det.id != (inc.primary_detection.id if inc.primary_detection else ""):
-                        self.detections.append(det)
-                for ev in inc.evidence:
-                    self.evidence[ev.id] = ev
-            logger.info("Loaded DEMO fixtures dataset.")
+            if get_demo_incidents is not None:
+                demo_incidents = get_demo_incidents()
+                for inc in demo_incidents:
+                    self.incidents[inc.id] = inc
+                    if inc.primary_detection:
+                        self.detections.append(inc.primary_detection)
+                    for det in inc.detections:
+                        if det.id != (inc.primary_detection.id if inc.primary_detection else ""):
+                            self.detections.append(det)
+                    for ev in inc.evidence:
+                        self.evidence[ev.id] = ev
+                logger.info("Loaded DEMO fixtures dataset.")
+            else:
+                logger.warning("DEMO fixtures module backend.data.fixtures is not available.")
 
         elif mode == "HISTORICAL_SAMPLE":
             # Load real FIRMS sample CSV
