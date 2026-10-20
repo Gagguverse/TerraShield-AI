@@ -1,0 +1,21 @@
+# TerraShield AI - Backend Production Dependencies
+# Target: Python 3.12 (CPU-only deployment on Render / Linux x86_64)
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Web Framework & ASGI Server
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+pydantic>=2.7.0,<3.0.0
+python-dotenv>=1.0.0
+
+# HTTP Networking & Autonomous Web Retrieval (NASA FIRMS, TinyFish, Groq)
+httpx>=0.27.0,<1.0.0
+
+# Numerical & Radiometric Image Processing
+numpy>=1.26.0,<2.0.0
+pillow>=10.0.0
+
+# Machine Learning & Computer Vision (CPU-targeted PyTorch & YOLO)
+torch>=2.2.0
+torchvision>=0.17.0
+ultralytics>=8.2.0
