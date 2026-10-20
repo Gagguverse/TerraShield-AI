@@ -1,0 +1,75 @@
+# Environment and secrets
+.env
+*.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local ML virtual environment (5+ GB)
+.ml_venv/
+
+# Large training datasets (>1.7 GB: IGNITE, DFire)
+datasets/
+data/
+
+# Model caches and downloader artifacts
+.cache/
+**/huggingface/
+backend/ml/models/**/.cache/
+backend/ml/models/**/download/
+
+# Runtime generated visualizations and logs
+backend/ml/logs/*.png
+backend/ml/logs/*.jpg
+backend/ml/logs/*.jpeg
+backend/ml/logs/*.jsonl
+!backend/ml/logs/.gitkeep
+backend/data/cache/*.json
+
+# Credentials and secrets
+*.pem
+*.key
+*.secret
